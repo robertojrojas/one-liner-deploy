@@ -7,6 +7,8 @@ It uses Python and Boto3 to provision the VPC and Ansible to configure and insta
 
 The Sample application is [GoTTY](https://github.com/yudai/gotty) - Share your terminal as a web application
 
+**The Sample application will only be accessible from the Public IP where `online.sh` script was executed at.**
+
 
 ## Software Dependencies
 
@@ -42,5 +44,9 @@ Something like:
 ./cleanup.sh vpc-xxxx i-xxxxxxx
 ```
 
+## Tested On
+
+* Mac OS X
+* CentOS 7.4
 
 Enjoy!
