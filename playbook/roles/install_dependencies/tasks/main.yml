@@ -1,0 +1,6 @@
+---
+# tasks file for install_dependencies
+- name: install docker
+  package:
+    name: docker.io
+    state: latest

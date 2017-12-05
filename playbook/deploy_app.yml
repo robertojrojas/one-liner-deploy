@@ -1,0 +1,5 @@
+- hosts: ol
+  become: true
+  become_user: root
+  roles:
+    - deploy_app

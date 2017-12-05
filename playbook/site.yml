@@ -1,0 +1,5 @@
+---
+# This playbook install docker and then deploys a container - sample web application
+
+- import_playbook: install_dependencies.yml
+- import_playbook: deploy_app.yml

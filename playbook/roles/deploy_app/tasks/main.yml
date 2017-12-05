@@ -1,0 +1,5 @@
+---
+# tasks file for deploy_app
+
+- name: Deploy Application running as Docker Container
+  command: bash -c 'docker run -d -p {{http_port}}:8080 robertojrojas/gotty-net:1.0'
