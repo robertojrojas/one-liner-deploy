@@ -3,6 +3,7 @@
 *.a
 *.so
 *.log
+*.retry
 
 *.pem
 inventory
