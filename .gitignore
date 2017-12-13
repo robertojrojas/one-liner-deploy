@@ -5,6 +5,12 @@
 *.log
 *.retry
 
+main
+Makefile
+CMakeFiles
+cmake_install.cmake
+CMakeCache.txt
+
 *.pem
 inventory
 
