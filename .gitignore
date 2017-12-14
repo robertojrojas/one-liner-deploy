@@ -5,6 +5,8 @@
 *.log
 *.retry
 
+.vscode
+
 main
 Makefile
 CMakeFiles
