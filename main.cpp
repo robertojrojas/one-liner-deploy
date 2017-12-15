@@ -12,6 +12,8 @@
 #include <aws/ec2/model/DescribeAvailabilityZonesRequest.h>
 #include <aws/ec2/model/CreateSubnetRequest.h>
 #include <aws/ec2/model/DescribeSubnetsRequest.h>
+#include <aws/ec2/model/CreateInternetGatewayRequest.h>
+#include <aws/ec2/model/AttachInternetGatewayRequest.h>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
@@ -76,7 +78,6 @@ std::tuple<const Aws::String , const Aws::String>createVPC(const Aws::EC2::EC2Cl
 }
 
 const Aws::String dhcpOptionSets(const Aws::EC2::EC2Client &ec2, const Aws::String& vpcId) {
-
     Aws::EC2::Model::CreateDhcpOptionsRequest createDhcpOptionsRequest;
 
     Aws::EC2::Model::NewDhcpConfiguration dhcpConfec2Internal;
@@ -171,6 +172,32 @@ std::tuple<const Aws::Vector<Aws::String> , const Aws::String> createSubnets(con
     return std::make_tuple(subnetIds, EMPTY);
 }
 
+std::tuple<const Aws::String , const Aws::String> createInternetGateway(const Aws::EC2::EC2Client &ec2, const Aws::String& vpcId) {
+   Aws::EC2::Model::CreateInternetGatewayRequest createInternetGatewayRequest;
+   auto createInternetGatewayOutcome = ec2.CreateInternetGateway(createInternetGatewayRequest);
+   if (!createInternetGatewayOutcome.IsSuccess()) {
+       return std::make_tuple(EMPTY, createInternetGatewayOutcome.GetError().GetMessage());
+   }
+   auto igwId = createInternetGatewayOutcome.GetResult().GetInternetGateway().GetInternetGatewayId();
+
+   Aws::EC2::Model::AttachInternetGatewayRequest attachInternetGatewayRequest;
+   attachInternetGatewayRequest.SetVpcId(vpcId);
+   attachInternetGatewayRequest.SetInternetGatewayId(igwId);
+   auto attachInternetGatewayOutcome = ec2.AttachInternetGateway(attachInternetGatewayRequest);
+   if (!attachInternetGatewayOutcome.IsSuccess()) {
+       return std::make_tuple(EMPTY, attachInternetGatewayOutcome.GetError().GetMessage());
+   }
+
+   std::stringstream igwss;
+   igwss << VPC_NAME_PREFIX << "-igw";
+   Aws::String igwTagName(igwss.str().c_str());
+   auto ret = nameResource(ec2, igwTagName, igwId);
+   if (ret != NO_ERROR) {
+     return std::make_tuple(EMPTY, ret);
+   }
+   return std::make_tuple(igwId,EMPTY);
+}
+
 
 int main(int argc, char** argv) {
     Aws::SDKOptions options;
@@ -200,6 +227,16 @@ int main(int argc, char** argv) {
         }
         auto subnetId = std::get<0>(subnetsResult)[0];
         std::cout << "Using SubnetId: " << subnetId << std::endl;
+
+        auto igwResult = createInternetGateway(ec2, vpcId);
+        if (std::get<1>(igwResult) != NO_ERROR) {
+            std::cout << "Failed to create InternetGateway " <<
+            std::get<1>(igwResult) << std::endl;
+            return 1;
+        }
+        auto igwId = std::get<0>(igwResult);
+        std::cout << "Create InternetGateway Id: " << igwId << std::endl;
+
     }    
 
     Aws::ShutdownAPI(options);
