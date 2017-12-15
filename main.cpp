@@ -3,6 +3,7 @@
 #include <aws/ec2/EC2Client.h>
 #include <aws/ec2/model/CreateVpcRequest.h>
 #include <aws/ec2/model/CreateTagsRequest.h>
+#include <aws/ec2/model/DescribeVpcsRequest.h>
 #include <iostream>
 #include <unordered_map>
 
@@ -37,14 +38,24 @@ std::tuple<const Aws::String , const Aws::String>createVPC(const Aws::EC2::EC2Cl
    {
       return std::make_tuple(EMPTY, createVpcOutcome.GetError().GetMessage());
    }
-//    std::cout << "Waiting for VPC to become available..." << std::endl;
-//    while(true) {
-//        if (createVpcOutcome.GetResult().GetVpc().GetState() == Aws::EC2::Model::VpcState::available) {
-//            break;
-//        }
-//        std::this_thread::sleep_for(std::chrono::seconds(1));
-//    }
    auto vpcId = createVpcOutcome.GetResult().GetVpc().GetVpcId();
+
+   std::cout << "Waiting for VPC to become available..." << std::endl;
+   Aws::EC2::Model::DescribeVpcsRequest describeVpcsReq;
+   Aws::Vector<Aws::String> vpcids = {vpcId};
+   describeVpcsReq.SetVpcIds(vpcids);
+   auto describeVpcsOutcome = ec2.DescribeVpcs(describeVpcsReq);
+   if (describeVpcsOutcome.IsSuccess()) {
+        while(true) {
+            if (describeVpcsOutcome.GetResult().GetVpcs()[0].GetState() == Aws::EC2::Model::VpcState::available) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+   } else {
+       return std::make_tuple(EMPTY, describeVpcsOutcome.GetError().GetMessage());
+   }
+
    auto ret = nameResource(ec2, VPC_NAME_PREFIX, vpcId);
    if (ret != NO_ERROR) {
        return std::make_tuple(EMPTY, ret);
