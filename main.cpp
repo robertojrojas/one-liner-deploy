@@ -9,10 +9,16 @@
 #include <aws/ec2/model/CreateDhcpOptionsRequest.h>
 #include <aws/ec2/model/AssociateDhcpOptionsRequest.h>
 #include <aws/ec2/model/NewDhcpConfiguration.h>
+#include <aws/ec2/model/DescribeAvailabilityZonesRequest.h>
+#include <aws/ec2/model/CreateSubnetRequest.h>
+#include <aws/ec2/model/DescribeSubnetsRequest.h>
 #include <iostream>
+#include <sstream>
 #include <unordered_map>
 
 #define CIDR_BLOCK "192.168.0.0/16"
+#define SUBNET_CIDR_PREFIX  "192.168." 
+#define SUBNET_CIDR_SUFFIX  ".0/24"
 #define EMPTY ""
 #define NO_ERROR EMPTY
 #define VPC_NAME_PREFIX  "oneliner"
@@ -112,6 +118,60 @@ const Aws::String dhcpOptionSets(const Aws::EC2::EC2Client &ec2, const Aws::Stri
 }
 
 
+std::tuple<const Aws::Vector<Aws::String> , const Aws::String> createSubnets(const Aws::EC2::EC2Client &ec2, const Aws::String& vpcId) {
+    Aws::EC2::Model::DescribeAvailabilityZonesRequest describeRequest;
+    auto describeOutcome = ec2.DescribeAvailabilityZones(describeRequest);
+
+    Aws::Vector<Aws::String> subnetIds;
+    if (!describeOutcome.IsSuccess()){
+        return std::make_tuple(subnetIds, describeOutcome.GetError().GetMessage());
+    }
+    const auto &zones =
+                describeOutcome.GetResult().GetAvailabilityZones();
+    int cidrIdx = 1;
+    for (const auto &zone : zones)
+    {
+        std::stringstream subnetCidr;
+        subnetCidr << SUBNET_CIDR_PREFIX << cidrIdx++ << SUBNET_CIDR_SUFFIX;
+        Aws::EC2::Model::CreateSubnetRequest createSubnetRequest;
+        createSubnetRequest.SetAvailabilityZone(zone.GetZoneName());
+        createSubnetRequest.SetVpcId(vpcId);
+        createSubnetRequest.SetCidrBlock(subnetCidr.str().c_str());
+        auto createSubnetOutcome = ec2.CreateSubnet(createSubnetRequest);
+        if (!createSubnetOutcome.IsSuccess()) {
+            return std::make_tuple(subnetIds, createSubnetOutcome.GetError().GetMessage());
+        }
+        auto subnetId = createSubnetOutcome.GetResult().GetSubnet().GetSubnetId();
+        Aws::EC2::Model::DescribeSubnetsRequest describeSubnetsRequest;
+        describeSubnetsRequest.AddSubnetIds(subnetId);
+        auto describeSubnetsOutcome = ec2.DescribeSubnets(describeSubnetsRequest);
+        if (!describeSubnetsOutcome.IsSuccess()) {
+            return std::make_tuple(subnetIds, describeSubnetsOutcome.GetError().GetMessage());
+        }
+
+        // TODO: figure out how to wait in a more elegant manner
+        std::cout << "Waiting for Subnet (" << subnetId  << ") to become available..." << std::endl;
+        while(true) {
+            if (describeSubnetsOutcome.GetResult().GetSubnets()[0].GetState() == Aws::EC2::Model::SubnetState::available) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        std::stringstream subnetTagNamess;
+        subnetTagNamess << VPC_NAME_PREFIX << "-sub-" << zone.GetZoneName();
+        Aws::String subnetTagName(subnetTagNamess.str().c_str()); 
+        auto ret = nameResource(ec2, subnetTagName, subnetId);
+        if (ret != NO_ERROR) {
+            return std::make_tuple(subnetIds, ret);
+        }
+        subnetIds.push_back(subnetId);
+
+    }
+    std::cout << "Done creating subnets" << std::endl;
+    return std::make_tuple(subnetIds, EMPTY);
+}
+
+
 int main(int argc, char** argv) {
     Aws::SDKOptions options;
     Aws::InitAPI(options);
@@ -131,6 +191,15 @@ int main(int argc, char** argv) {
             std::cout << "Failed to configure DHCP Sets "  << std::endl;
             return 1;
         }
+
+        auto subnetsResult = createSubnets(ec2, vpcId);
+        if (std::get<1>(subnetsResult) != NO_ERROR) {
+            std::cout << "Failed to create subnets " <<
+            std::get<1>(subnetsResult) << std::endl;
+            return 1;
+        }
+        auto subnetId = std::get<0>(subnetsResult)[0];
+        std::cout << "Using SubnetId: " << subnetId << std::endl;
     }    
 
     Aws::ShutdownAPI(options);
