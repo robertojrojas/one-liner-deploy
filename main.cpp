@@ -14,10 +14,14 @@
 #include <aws/ec2/model/DescribeSubnetsRequest.h>
 #include <aws/ec2/model/CreateInternetGatewayRequest.h>
 #include <aws/ec2/model/AttachInternetGatewayRequest.h>
+#include <aws/ec2/model/CreateRouteTableRequest.h>
+#include <aws/ec2/model/AssociateRouteTableRequest.h>
+#include <aws/ec2/model/CreateRouteRequest.h>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
 
+#define ANYWHERE  "0.0.0.0/0"
 #define CIDR_BLOCK "192.168.0.0/16"
 #define SUBNET_CIDR_PREFIX  "192.168." 
 #define SUBNET_CIDR_SUFFIX  ".0/24"
@@ -199,6 +203,73 @@ std::tuple<const Aws::String , const Aws::String> createInternetGateway(const Aw
 }
 
 
+/*
+    func createCustomRouteTable(client *ec2.EC2, vpc *ec2.Vpc, igw *ec2.InternetGateway, subnetID *string) error {
+	fmt.Println("creating createCustomRouteTable...")
+	crti := &ec2.CreateRouteTableInput{
+		VpcId: vpc.VpcId,
+	}
+	createRouteTableOutput, err := client.CreateRouteTable(crti)
+	if err != nil {
+		return err
+	}
+	cri := &ec2.CreateRouteInput{
+		DestinationCidrBlock: aws.String(anywhere),
+		NatGatewayId:         igw.InternetGatewayId,
+		RouteTableId:         createRouteTableOutput.RouteTable.RouteTableId,
+	}
+	_, err = client.CreateRoute(cri)
+	if err != nil {
+		return err
+	}
+
+	arti := &ec2.AssociateRouteTableInput{
+		RouteTableId: createRouteTableOutput.RouteTable.RouteTableId,
+		SubnetId:     subnetID,
+	}
+	_, err = client.AssociateRouteTable(arti)
+	if err != nil {
+		return err
+	}
+	nameResource(client, createRouteTableOutput.RouteTable.RouteTableId, vpcNamePrefix+"-rt")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+*/
+
+const Aws::String createCustomRouteTable(const Aws::EC2::EC2Client &ec2, 
+                     const Aws::String& vpcId, const Aws::String& igwId, const Aws::String& subnetId) {
+    
+    Aws::EC2::Model::CreateRouteTableRequest createRouteTableRequest;
+    createRouteTableRequest.SetVpcId(vpcId);
+    auto createRouteTableOutcome = ec2.CreateRouteTable(createRouteTableRequest);
+    if (!createRouteTableOutcome.IsSuccess()) {
+        return createRouteTableOutcome.GetError().GetMessage();
+    }
+    auto routeTableId = createRouteTableOutcome.GetResult().GetRouteTable().GetRouteTableId();
+    
+    Aws::EC2::Model::CreateRouteRequest createRouteRequest;
+    createRouteRequest.SetRouteTableId(routeTableId);
+    createRouteRequest.SetNatGatewayId(igwId);
+    createRouteRequest.SetDestinationCidrBlock(ANYWHERE);
+    auto createRouteOutcome = ec2.CreateRoute(createRouteRequest);
+    if (!createRouteOutcome.IsSuccess()) {
+        return createRouteOutcome.GetError().GetMessage();
+    }
+    
+    Aws::EC2::Model::AssociateRouteTableRequest associateRouteTableRequest;
+    associateRouteTableRequest.SetRouteTableId(routeTableId);
+    associateRouteTableRequest.SetSubnetId(subnetId);
+    auto associateRouteTableOutcome = ec2.AssociateRouteTable(associateRouteTableRequest);
+    if (!associateRouteTableOutcome.IsSuccess()) {
+        return associateRouteTableOutcome.GetError().GetMessage();
+    }
+   return NO_ERROR;
+}
+
+
 int main(int argc, char** argv) {
     Aws::SDKOptions options;
     Aws::InitAPI(options);
@@ -237,6 +308,13 @@ int main(int argc, char** argv) {
         auto igwId = std::get<0>(igwResult);
         std::cout << "Create InternetGateway Id: " << igwId << std::endl;
 
+        auto routeTableResult = createCustomRouteTable(ec2, vpcId, igwId, subnetId);
+        if (routeTableResult != NO_ERROR) {
+            std::cout << "Failed to create Route Table " <<
+            routeTableResult << std::endl;
+            return 1;
+        }
+        
     }    
 
     Aws::ShutdownAPI(options);
