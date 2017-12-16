@@ -400,35 +400,30 @@ const std::string readFile(const std::string& filename) {
     }
     inFile.close();
     return data.str();
-  
+}
+
+bool sortByCreationDate(const Aws::EC2::Model::Image& left, const Aws::EC2::Model::Image& right) { 
+    Aws::Utils::DateTime leftCreateDate(left.GetCreationDate(), Aws::Utils::DateFormat::ISO_8601); 
+    Aws::Utils::DateTime rightCreateDate(right.GetCreationDate(), Aws::Utils::DateFormat::ISO_8601); 
+    return leftCreateDate > rightCreateDate; 
 }
 
 std::tuple<const Aws::String , const Aws::String> findUbuntuAMI(const Aws::EC2::EC2Client &ec2) {
-    // Aws::EC2::Model::DescribeImagesRequest request;
-    
-    // Aws::EC2::Model::Filter ubuntuFilter;
-    // ubuntuFilter.SetName("name");
-    // ubuntuFilter.AddValues(UBUNTU_XENIAL_QUERY_STR);
-    // Aws::Vector<Aws::EC2::Model::Filter> filters;
-    // filters.push_back(ubuntuFilter);
-    // request.SetFilters(filters);
-    // auto outcome =  ec2.DescribeImages(request);
-    // if (!outcome.IsSuccess()) {
-    //    return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
-    // }
-    //TODO: Sort images return to get the latest one
-    // Aws::String ubuntuAmi;
-    // auto images = outcome.GetResult().GetImages();
-    // for (const auto &ami : images) 
-    // {   
-    //     if (ami.GetVirtualizationType() == Aws::EC2::Model::VirtualizationType::hvm
-    //         ) {
-    //         return std::make_tuple(ami.GetImageId(), EMPTY);
-    //     }
-
-    // }
-    //return std::make_tuple(EMPTY, "Unable to find ubuntu ami");
-    return  std::make_tuple("ami-3dec9947", EMPTY); 
+    Aws::EC2::Model::DescribeImagesRequest request;
+    Aws::EC2::Model::Filter ubuntuFilter;
+    ubuntuFilter.SetName("name");
+    ubuntuFilter.AddValues(UBUNTU_XENIAL_QUERY_STR);
+    Aws::Vector<Aws::EC2::Model::Filter> filters;
+    filters.push_back(ubuntuFilter);
+    request.SetFilters(filters);
+    auto outcome =  ec2.DescribeImages(request);
+    if (!outcome.IsSuccess()) {
+       return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
+    }
+    auto images = outcome.GetResult().GetImages();
+    std::sort(images.begin(), images.end(), sortByCreationDate);
+    auto latestUbuntuAMI = images[0].GetImageId();
+    return std::make_tuple(latestUbuntuAMI, EMPTY);
 }
 
 std::tuple<const Aws::String , const Aws::String> runInstance(const Aws::EC2::EC2Client &ec2, 
@@ -440,6 +435,7 @@ std::tuple<const Aws::String , const Aws::String> runInstance(const Aws::EC2::EC
         return std::make_tuple(EMPTY, std::get<1>(findAmiRet));
     }
     auto ubuntuAMI = std::get<0>(findAmiRet);
+    std::cout << "Using AMI: " << ubuntuAMI << std::endl;
     Aws::String ami(ubuntuAMI.c_str());
     runInstancesRequest.SetImageId(ami);
     runInstancesRequest.SetInstanceType(Aws::EC2::Model::InstanceType::t2_medium);
@@ -478,34 +474,27 @@ std::tuple<const Aws::String , const Aws::String> runInstance(const Aws::EC2::EC
 
     auto instance_id = instances[0].GetInstanceId();
     std::cout << "Waiting for EC2 " << instance_id << " instance to start running " << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(180));
+ 
+     while(true) {
+        std::this_thread::sleep_for(std::chrono::seconds(15));
+        Aws::EC2::Model::DescribeInstanceStatusRequest request;
+        request.AddInstanceIds(instance_id);
 
-    //TODO: Figure out how to wait for Instance
-    // while(true) {
-    //     // Aws::EC2::Model::DescribeInstancesRequest request;
-    //     // request.AddInstanceIds(instance_id);
+        auto outcome = ec2.DescribeInstanceStatus(request);
+        if (!outcome.IsSuccess())
+        {
+            return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
+        }
 
-    //     Aws::EC2::Model::DescribeInstanceStatusRequest request;
-    //     request.AddInstanceIds(instance_id);
-
-    //     auto outcome = ec2.DescribeInstanceStatus(request);
-    //     if (!outcome.IsSuccess())
-    //     {
-    //         return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
-    //     }
-    //     auto status = outcome.GetResult().GetInstanceStatuses()[0].GetInstanceStatus().GetStatus();
-    //     if (status == Aws::EC2::Model::SummaryStatus::ok) {
-    //         break;
-    //     }
-    //     // auto state = outcome.GetResult().GetReservations()[0].GetInstances()[0].GetState();
-    //     // outcome.GetResult().GetReservations()[0].GetInstances()[0]
-    //     // if (state.GetCode() == 16 /*running*/) {
-    //     //     break;
-    //     // }
-    //     //std::cout << "Instance state code: " << state.GetCode() << ", state name: " << std::endl;
-    //     std::this_thread::sleep_for(std::chrono::seconds(5));
-    // }
-
+        // Instance is probably coming up - try later
+        if (outcome.GetResult().GetInstanceStatuses().size() == 0) {
+            continue;    
+        }
+        auto status = outcome.GetResult().GetInstanceStatuses()[0].GetInstanceStatus().GetStatus();
+        if (status == Aws::EC2::Model::SummaryStatus::ok) {
+            break;
+        }
+    }
 
     auto nameResourceRet = nameResource(ec2, INSTANCE_NAME, instance_id);
     if (nameResourceRet != NO_ERROR)
