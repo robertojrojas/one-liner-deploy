@@ -20,6 +20,12 @@
 #include <aws/ec2/model/CreateSecurityGroupRequest.h>
 #include <aws/ec2/model/AuthorizeSecurityGroupIngressRequest.h>
 #include <aws/ec2/model/CreateKeyPairRequest.h>
+#include <aws/ec2/model/RunInstancesRequest.h>
+#include <aws/ec2/model/DescribeInstancesRequest.h>
+#include <aws/ec2/model/InstanceNetworkInterfaceSpecification.h>
+#include <aws/ec2/model/DeleteKeyPairRequest.h>
+#include <aws/ec2/model/DescribeInstanceStatusRequest.h>
+#include <aws/core/utils/HashingUtils.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -40,6 +46,8 @@
 #define SECURITY_GROUP_NAME  "oneliner-sg"
 #define MYIP_SERVICE_URL "http://ipecho.net/plain"
 #define	KEY_PAIR_NAME "oneliner-key"
+#define INSTANCE_NAME "oneliner-instance"
+#define INSTALL_PYTHON_SCRIPT "install_python.sh"
 
 
 const Aws::String nameResource(const Aws::EC2::EC2Client &ec2, const Aws::String& tagName, const Aws::String& resourceId) {
@@ -335,28 +343,6 @@ std::tuple<const Aws::String , const Aws::String> createSecurityGroup(const Aws:
 }
 
 
-
-
-/*
-func createSSHKeyPair(client *ec2.EC2) error {
-	fmt.Println("creating createSSHKeyPair...")
-	dkpi := &ec2.DeleteKeyPairInput{
-		KeyName: aws.String(keyName),
-	}
-	client.DeleteKeyPair(dkpi)
-
-	ckpi := &ec2.CreateKeyPairInput{
-		KeyName: aws.String(keyName),
-	}
-	createKeyPairOutput, err := client.CreateKeyPair(ckpi)
-	if err != nil {
-		return err
-	}
-	writeFile(keyName+".pem", []byte(*createKeyPairOutput.KeyMaterial))
-	return nil
-}
-*/
-
 const std::string writeFile(const std::string& filename, const std::string& content) {
     std::ofstream destFile;
     destFile.open (filename);
@@ -365,7 +351,22 @@ const std::string writeFile(const std::string& filename, const std::string& cont
     return NO_ERROR;
 }
 
+const std::string buildKeyNameFilename() {
+    std::stringstream sfile;
+    sfile << KEY_PAIR_NAME << ".pem";
+    return sfile.str();
+}
+
 const Aws::String createSSHKeyPair(const Aws::EC2::EC2Client &ec2) {
+
+    Aws::EC2::Model::DeleteKeyPairRequest del_request;
+    del_request.SetKeyName(KEY_PAIR_NAME);
+    auto dloutcome = ec2.DeleteKeyPair(del_request);
+    if (!dloutcome.IsSuccess())
+    {
+       return dloutcome.GetError().GetMessage();
+    }
+
     Aws::EC2::Model::CreateKeyPairRequest request;
     request.SetKeyName(KEY_PAIR_NAME);
 
@@ -375,9 +376,7 @@ const Aws::String createSSHKeyPair(const Aws::EC2::EC2Client &ec2) {
        return outcome.GetError().GetMessage();
     }
     auto keyMaterial = outcome.GetResult().GetKeyMaterial();
-    std::stringstream sfile;
-    sfile << KEY_PAIR_NAME << ".pem";
-    auto ret = writeFile(sfile.str(), keyMaterial.c_str());
+    auto ret = writeFile(buildKeyNameFilename(), keyMaterial.c_str());
     if (ret != NO_ERROR) {
         return ret.c_str();
     }
@@ -385,7 +384,120 @@ const Aws::String createSSHKeyPair(const Aws::EC2::EC2Client &ec2) {
 }
 
 
+const std::string readFile(const std::string& filename) {
+    std::ifstream inFile (filename);
+    std::string line;
+    std::stringstream data;
+    if (!inFile.is_open())
+    {
+        return EMPTY;
+    }
+    while ( getline (inFile,line) )
+    {
+        data << line << '\n';
+    }
+    inFile.close();
+    return data.str();
+  
+}
 
+const std::string findUbuntuAMI(const Aws::EC2::EC2Client &ec2) {
+    return "ami-13c15e69";
+}
+
+std::tuple<const Aws::String , const Aws::String> runInstance(const Aws::EC2::EC2Client &ec2, 
+                const Aws::String& secGroup, const Aws::String& subnetId) {
+
+    Aws::EC2::Model::RunInstancesRequest runInstancesRequest;
+    auto ubuntuAMI = findUbuntuAMI(ec2);
+    Aws::String ami(ubuntuAMI.c_str());
+    runInstancesRequest.SetImageId(ami);
+    runInstancesRequest.SetInstanceType(Aws::EC2::Model::InstanceType::t2_medium);
+    runInstancesRequest.SetMinCount(1);
+    runInstancesRequest.SetMaxCount(1);
+
+    auto userDataScript = readFile(INSTALL_PYTHON_SCRIPT);
+    Aws::String userdata = Aws::Utils::HashingUtils::Base64Encode(
+            Aws::Utils::ByteBuffer((unsigned char*)userDataScript.c_str(), userDataScript.size()));
+    runInstancesRequest.SetUserData(userdata);
+
+    Aws::String kn(KEY_PAIR_NAME);
+    runInstancesRequest.SetKeyName(kn);
+    Aws::Vector<Aws::EC2::Model::InstanceNetworkInterfaceSpecification> nicSpecs;
+    Aws::EC2::Model::InstanceNetworkInterfaceSpecification nicSpec;
+    nicSpec.SetDeviceIndex(0);
+    nicSpec.SetSubnetId(subnetId);
+    nicSpec.AddGroups(secGroup);
+    nicSpec.SetAssociatePublicIpAddress(true);
+    nicSpecs.push_back(nicSpec);
+    runInstancesRequest.SetNetworkInterfaces(nicSpecs);
+
+    auto run_outcome = ec2.RunInstances(runInstancesRequest);
+    if (!run_outcome.IsSuccess())
+    {
+        return std::make_tuple(EMPTY, run_outcome.GetError().GetMessage());
+    }
+
+    const auto& instances = run_outcome.GetResult().GetInstances();
+    if (instances.size() == 0)
+    {
+        std::stringstream se;
+        se << "Failed to start ec2 instance based on ami " << ubuntuAMI;
+        return std::make_tuple(EMPTY, se.str().c_str());
+    }
+
+    auto instance_id = instances[0].GetInstanceId();
+    std::cout << "Waiting for EC2 " << instance_id << " instance to start running " << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(180));
+
+    //TODO: Figure out how to wait for Instance
+    // while(true) {
+    //     // Aws::EC2::Model::DescribeInstancesRequest request;
+    //     // request.AddInstanceIds(instance_id);
+
+    //     Aws::EC2::Model::DescribeInstanceStatusRequest request;
+    //     request.AddInstanceIds(instance_id);
+
+    //     auto outcome = ec2.DescribeInstanceStatus(request);
+    //     if (!outcome.IsSuccess())
+    //     {
+    //         return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
+    //     }
+    //     auto status = outcome.GetResult().GetInstanceStatuses()[0].GetInstanceStatus().GetStatus();
+    //     if (status == Aws::EC2::Model::SummaryStatus::ok) {
+    //         break;
+    //     }
+    //     // auto state = outcome.GetResult().GetReservations()[0].GetInstances()[0].GetState();
+    //     // outcome.GetResult().GetReservations()[0].GetInstances()[0]
+    //     // if (state.GetCode() == 16 /*running*/) {
+    //     //     break;
+    //     // }
+    //     //std::cout << "Instance state code: " << state.GetCode() << ", state name: " << std::endl;
+    //     std::this_thread::sleep_for(std::chrono::seconds(5));
+    // }
+
+
+    auto nameResourceRet = nameResource(ec2, INSTANCE_NAME, instance_id);
+    if (nameResourceRet != NO_ERROR)
+    {
+      std::make_tuple(EMPTY, nameResourceRet);
+    }
+    return std::make_tuple(instance_id, EMPTY);
+}
+
+
+std::tuple<const Aws::String , const Aws::String> getInstancePublicIP(const Aws::EC2::EC2Client &ec2, const Aws::String instanceId) {
+    Aws::EC2::Model::DescribeInstancesRequest request;
+    request.AddInstanceIds(instanceId);
+
+    auto outcome = ec2.DescribeInstances(request);
+    if (!outcome.IsSuccess())
+    {
+       return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
+    }
+    auto pubIP = outcome.GetResult().GetReservations()[0].GetInstances()[0].GetPublicIpAddress();
+    return std::make_tuple(pubIP, EMPTY);
+}
 
 int main(int argc, char** argv) {
     Aws::SDKOptions options;
@@ -448,6 +560,33 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        auto runInstanceRet = runInstance(ec2, sgId, subnetId);
+        if (std::get<1>(runInstanceRet) != NO_ERROR) {
+            std::cout << "Failed to run instance " <<
+            std::get<1>(runInstanceRet) << std::endl;
+            return 1;
+        }
+        auto instanceId = std::get<0>(runInstanceRet);
+        std::cout << "Instance id: " << instanceId << std::endl;
+
+        auto pubIPRet = getInstancePublicIP(ec2, instanceId);
+        if (std::get<1>(pubIPRet) != NO_ERROR) {
+            std::cout << "Failed to get instance Public IP " <<
+            std::get<1>(pubIPRet) << std::endl;
+            return 1;
+        }
+        auto pubIP =  std::get<0>(pubIPRet);
+        std::cout << "###### SAMPLE APP URL: http://" << pubIP << ":8000 ######" << std::endl;
+
+        std::stringstream icss;
+        icss << "ol ansible_user=ubuntu ansible_ssh_host=" << pubIP << " ansible_ssh_port=22 ansible_ssh_private_key_file=./" << buildKeyNameFilename() ;
+        auto wfRet = writeFile("inventory", icss.str());
+        if (wfRet != NO_ERROR) {
+            std::cout << "Failed to create Inventory file " <<
+            wfRet << std::endl;
+            return 1;
+        }
+        std::cout << "CLEANUP: ./cleanup.sh " << vpcId << " " << instanceId << std::endl;
     }    
 
     Aws::ShutdownAPI(options);

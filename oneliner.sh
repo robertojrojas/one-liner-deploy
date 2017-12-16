@@ -5,6 +5,7 @@ rm -f oneliner-key.pem
 
 echo 'Provisioning AWS.... This might take a few minutes'
 ./main.py
+#./main
 
 if [ $? -eq 0 ]; then
   chmod 400 oneliner-key.pem
