@@ -19,8 +19,10 @@
 #include <aws/ec2/model/CreateRouteRequest.h>
 #include <aws/ec2/model/CreateSecurityGroupRequest.h>
 #include <aws/ec2/model/AuthorizeSecurityGroupIngressRequest.h>
+#include <aws/ec2/model/CreateKeyPairRequest.h>
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <unordered_map>
 #include <curl/curl.h>
 
@@ -37,6 +39,8 @@
 #define SECURITY_GROUP_DESCRITPION "oneliner 8000/22"
 #define SECURITY_GROUP_NAME  "oneliner-sg"
 #define MYIP_SERVICE_URL "http://ipecho.net/plain"
+#define	KEY_PAIR_NAME "oneliner-key"
+
 
 const Aws::String nameResource(const Aws::EC2::EC2Client &ec2, const Aws::String& tagName, const Aws::String& resourceId) {
     Aws::EC2::Model::Tag name_tag;
@@ -241,60 +245,6 @@ const Aws::String createCustomRouteTable(const Aws::EC2::EC2Client &ec2,
 }
 
 
-
-/*
-    func createSecurityGroup(client *ec2.EC2, vpc *ec2.Vpc) (*string, error) {
-	fmt.Println("creating createSecurityGroup...")
-	csgi := &ec2.CreateSecurityGroupInput{
-		GroupName:   aws.String(secGroupName),
-		Description: aws.String("oneliner 8000/22"),
-		VpcId:       vpc.VpcId,
-	}
-	createSecurityGroupOutput, err := client.CreateSecurityGroup(csgi)
-	if err != nil {
-		return nil, err
-	}
-
-	myIP, err := getMyIP()
-	if err != nil {
-		return nil, err
-	}
-	myIPCidr := fmt.Sprintf("%s/32", myIP)
-	port := aws.Int64(8000)
-	asgii8000 := &ec2.AuthorizeSecurityGroupIngressInput{
-		CidrIp:     aws.String(myIPCidr),
-		IpProtocol: aws.String("tcp"),
-		FromPort:   port,
-		ToPort:     port,
-		GroupId:    createSecurityGroupOutput.GroupId,
-	}
-	_, err = client.AuthorizeSecurityGroupIngress(asgii8000)
-	if err != nil {
-		return nil, err
-	}
-	port = aws.Int64(22)
-	asgii22 := &ec2.AuthorizeSecurityGroupIngressInput{
-		CidrIp:     aws.String(myIPCidr),
-		IpProtocol: aws.String("tcp"),
-		FromPort:   port,
-		ToPort:     port,
-		GroupId:    createSecurityGroupOutput.GroupId,
-	}
-
-	_, err = client.AuthorizeSecurityGroupIngress(asgii22)
-	if err != nil {
-		return nil, err
-	}
-	nameResource(client, createSecurityGroupOutput.GroupId, "oneliner-sg")
-	if err != nil {
-		return nil, err
-	}
-	return createSecurityGroupOutput.GroupId, nil
-}
-
-*/
-
-
 static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 {
     ((std::string*)userp)->append((char*)contents, size * nmemb);
@@ -385,6 +335,8 @@ std::tuple<const Aws::String , const Aws::String> createSecurityGroup(const Aws:
 }
 
 
+
+
 /*
 func createSSHKeyPair(client *ec2.EC2) error {
 	fmt.Println("creating createSSHKeyPair...")
@@ -405,6 +357,32 @@ func createSSHKeyPair(client *ec2.EC2) error {
 }
 */
 
+const std::string writeFile(const std::string& filename, const std::string& content) {
+    std::ofstream destFile;
+    destFile.open (filename);
+    destFile << content;
+    destFile.close();
+    return NO_ERROR;
+}
+
+const Aws::String createSSHKeyPair(const Aws::EC2::EC2Client &ec2) {
+    Aws::EC2::Model::CreateKeyPairRequest request;
+    request.SetKeyName(KEY_PAIR_NAME);
+
+    auto outcome = ec2.CreateKeyPair(request);
+    if (!outcome.IsSuccess())
+    {
+       return outcome.GetError().GetMessage();
+    }
+    auto keyMaterial = outcome.GetResult().GetKeyMaterial();
+    std::stringstream sfile;
+    sfile << KEY_PAIR_NAME << ".pem";
+    auto ret = writeFile(sfile.str(), keyMaterial.c_str());
+    if (ret != NO_ERROR) {
+        return ret.c_str();
+    }
+    return NO_ERROR;
+}
 
 
 
@@ -463,6 +441,12 @@ int main(int argc, char** argv) {
         auto sgId = std::get<0>(sgResult);
         std::cout << "Create Security Group Id: " << sgId << std::endl;
 
+        auto ret = createSSHKeyPair(ec2);
+        if (ret != NO_ERROR) {
+            std::cout << "Failed to create Key Pair " <<
+            ret << std::endl;
+            return 1;
+        }
 
     }    
 
