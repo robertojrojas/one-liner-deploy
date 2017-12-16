@@ -109,7 +109,16 @@ const Aws::String dhcpOptionSets(const Aws::EC2::EC2Client &ec2, const Aws::Stri
     Aws::EC2::Model::NewDhcpConfiguration dhcpConfec2Internal;
     dhcpConfec2Internal.SetKey("domain-name");
     Aws::Vector<Aws::String> dhcpConfec2InternalVals;
-    dhcpConfec2InternalVals.push_back(Aws::String("ec2.internal"));
+
+    Aws::Client::ClientConfiguration config;
+    std::cout << "REGION: " << config.region << std::endl;
+    Aws::String internalDNS;
+    if (config.region == "us-east-1") {
+        internalDNS = "ec2.internal";
+    } else {
+        internalDNS = config.region + ".compute.internal";
+    }
+    dhcpConfec2InternalVals.push_back(internalDNS);
     dhcpConfec2Internal.SetValues(dhcpConfec2InternalVals);
     createDhcpOptionsRequest.AddDhcpConfigurations(dhcpConfec2Internal);    
 
