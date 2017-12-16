@@ -17,18 +17,26 @@
 #include <aws/ec2/model/CreateRouteTableRequest.h>
 #include <aws/ec2/model/AssociateRouteTableRequest.h>
 #include <aws/ec2/model/CreateRouteRequest.h>
+#include <aws/ec2/model/CreateSecurityGroupRequest.h>
+#include <aws/ec2/model/AuthorizeSecurityGroupIngressRequest.h>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
+#include <curl/curl.h>
 
 #define ANYWHERE  "0.0.0.0/0"
 #define CIDR_BLOCK "192.168.0.0/16"
 #define SUBNET_CIDR_PREFIX  "192.168." 
 #define SUBNET_CIDR_SUFFIX  ".0/24"
+#define PROTOCOL "tcp"
 #define EMPTY ""
 #define NO_ERROR EMPTY
+// TODO: Figure out concat strings
 #define VPC_NAME_PREFIX  "oneliner"
-#define VPC_NAME "oneliner-vpc" // TODO: Figure out concat strings
+#define VPC_NAME "oneliner-vpc" 
+#define SECURITY_GROUP_DESCRITPION "oneliner 8000/22"
+#define SECURITY_GROUP_NAME  "oneliner-sg"
+#define MYIP_SERVICE_URL "http://ipecho.net/plain"
 
 const Aws::String nameResource(const Aws::EC2::EC2Client &ec2, const Aws::String& tagName, const Aws::String& resourceId) {
     Aws::EC2::Model::Tag name_tag;
@@ -202,43 +210,6 @@ std::tuple<const Aws::String , const Aws::String> createInternetGateway(const Aw
    return std::make_tuple(igwId,EMPTY);
 }
 
-
-/*
-    func createCustomRouteTable(client *ec2.EC2, vpc *ec2.Vpc, igw *ec2.InternetGateway, subnetID *string) error {
-	fmt.Println("creating createCustomRouteTable...")
-	crti := &ec2.CreateRouteTableInput{
-		VpcId: vpc.VpcId,
-	}
-	createRouteTableOutput, err := client.CreateRouteTable(crti)
-	if err != nil {
-		return err
-	}
-	cri := &ec2.CreateRouteInput{
-		DestinationCidrBlock: aws.String(anywhere),
-		NatGatewayId:         igw.InternetGatewayId,
-		RouteTableId:         createRouteTableOutput.RouteTable.RouteTableId,
-	}
-	_, err = client.CreateRoute(cri)
-	if err != nil {
-		return err
-	}
-
-	arti := &ec2.AssociateRouteTableInput{
-		RouteTableId: createRouteTableOutput.RouteTable.RouteTableId,
-		SubnetId:     subnetID,
-	}
-	_, err = client.AssociateRouteTable(arti)
-	if err != nil {
-		return err
-	}
-	nameResource(client, createRouteTableOutput.RouteTable.RouteTableId, vpcNamePrefix+"-rt")
-	if err != nil {
-		return err
-	}
-	return nil
-}
-*/
-
 const Aws::String createCustomRouteTable(const Aws::EC2::EC2Client &ec2, 
                      const Aws::String& vpcId, const Aws::String& igwId, const Aws::String& subnetId) {
     
@@ -268,6 +239,174 @@ const Aws::String createCustomRouteTable(const Aws::EC2::EC2Client &ec2,
     }
    return NO_ERROR;
 }
+
+
+
+/*
+    func createSecurityGroup(client *ec2.EC2, vpc *ec2.Vpc) (*string, error) {
+	fmt.Println("creating createSecurityGroup...")
+	csgi := &ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String(secGroupName),
+		Description: aws.String("oneliner 8000/22"),
+		VpcId:       vpc.VpcId,
+	}
+	createSecurityGroupOutput, err := client.CreateSecurityGroup(csgi)
+	if err != nil {
+		return nil, err
+	}
+
+	myIP, err := getMyIP()
+	if err != nil {
+		return nil, err
+	}
+	myIPCidr := fmt.Sprintf("%s/32", myIP)
+	port := aws.Int64(8000)
+	asgii8000 := &ec2.AuthorizeSecurityGroupIngressInput{
+		CidrIp:     aws.String(myIPCidr),
+		IpProtocol: aws.String("tcp"),
+		FromPort:   port,
+		ToPort:     port,
+		GroupId:    createSecurityGroupOutput.GroupId,
+	}
+	_, err = client.AuthorizeSecurityGroupIngress(asgii8000)
+	if err != nil {
+		return nil, err
+	}
+	port = aws.Int64(22)
+	asgii22 := &ec2.AuthorizeSecurityGroupIngressInput{
+		CidrIp:     aws.String(myIPCidr),
+		IpProtocol: aws.String("tcp"),
+		FromPort:   port,
+		ToPort:     port,
+		GroupId:    createSecurityGroupOutput.GroupId,
+	}
+
+	_, err = client.AuthorizeSecurityGroupIngress(asgii22)
+	if err != nil {
+		return nil, err
+	}
+	nameResource(client, createSecurityGroupOutput.GroupId, "oneliner-sg")
+	if err != nil {
+		return nil, err
+	}
+	return createSecurityGroupOutput.GroupId, nil
+}
+
+*/
+
+
+static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+const std::tuple<const std::string , const std::string >  getMyIP() {
+    std::string readBuffer;
+    CURL *curl;
+    CURLcode res;
+    curl = curl_easy_init();
+    if(!curl) {
+        return std::make_tuple(EMPTY, "Error initializing CURL!");
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, MYIP_SERVICE_URL);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+    /* Perform the request, res will get the return code */ 
+    res = curl_easy_perform(curl);
+    /* Check for errors */ 
+    if(res != CURLE_OK) {
+        std::stringstream hse;
+        hse << "curl_easy_perform() failed: " <<  curl_easy_strerror(res);
+        return std::make_tuple(EMPTY, hse.str());
+    }
+
+    /* always cleanup */ 
+    curl_easy_cleanup(curl);
+
+    return std::make_tuple(readBuffer, EMPTY);
+}
+
+
+std::tuple<const Aws::String , const Aws::String> createSecurityGroup(const Aws::EC2::EC2Client &ec2, 
+                                        const Aws::String& vpcId)
+{
+    Aws::EC2::Model::CreateSecurityGroupRequest createSecurityGroupRequest;
+    createSecurityGroupRequest.SetVpcId(vpcId);
+    std::stringstream gnss;
+    gnss << VPC_NAME_PREFIX << "-sg" ;
+    createSecurityGroupRequest.SetGroupName(gnss.str().c_str());
+    createSecurityGroupRequest.SetDescription(SECURITY_GROUP_DESCRITPION);
+    auto createSecurityGroupOutcome = ec2.CreateSecurityGroup(createSecurityGroupRequest);
+    if (!createSecurityGroupOutcome.IsSuccess()) {
+        return std::make_tuple(EMPTY, createSecurityGroupOutcome.GetError().GetMessage());
+    }
+    auto sgId = createSecurityGroupOutcome.GetResult().GetGroupId();
+    auto myIPResult = getMyIP();
+    if (std::get<1>(myIPResult) != NO_ERROR) {
+        Aws::String myIPError(std::get<1>(myIPResult).c_str());
+        return std::make_tuple(EMPTY, myIPError);
+    }
+    auto myIP = std::get<0>(myIPResult);
+    std::stringstream mcss;
+    mcss << myIP << "/32";
+
+    std::cout << "My IP: " << myIP << std::endl;
+
+    Aws::EC2::Model::AuthorizeSecurityGroupIngressRequest authorizeSecurityGroupIngressRequest8000;
+    authorizeSecurityGroupIngressRequest8000.SetCidrIp(mcss.str().c_str());
+    authorizeSecurityGroupIngressRequest8000.SetIpProtocol(PROTOCOL);
+    authorizeSecurityGroupIngressRequest8000.SetFromPort(8000);
+    authorizeSecurityGroupIngressRequest8000.SetToPort(8000);
+    authorizeSecurityGroupIngressRequest8000.SetGroupId(sgId);
+    auto a8000Outcome = ec2.AuthorizeSecurityGroupIngress(authorizeSecurityGroupIngressRequest8000);
+    if (!a8000Outcome.IsSuccess()) {
+        return std::make_tuple(EMPTY, a8000Outcome.GetError().GetMessage());
+    }
+
+    Aws::EC2::Model::AuthorizeSecurityGroupIngressRequest authorizeSecurityGroupIngressRequest22;
+    authorizeSecurityGroupIngressRequest22.SetCidrIp(mcss.str().c_str());
+    authorizeSecurityGroupIngressRequest22.SetIpProtocol(PROTOCOL);
+    authorizeSecurityGroupIngressRequest22.SetFromPort(22);
+    authorizeSecurityGroupIngressRequest22.SetToPort(22);
+    authorizeSecurityGroupIngressRequest22.SetGroupId(sgId);
+    auto a22utcome =ec2.AuthorizeSecurityGroupIngress(authorizeSecurityGroupIngressRequest22);
+    if (!a22utcome.IsSuccess()) {
+        return std::make_tuple(EMPTY, a22utcome.GetError().GetMessage());
+    }
+
+    auto ret = nameResource(ec2, SECURITY_GROUP_NAME, sgId);
+    if (ret != NO_ERROR) {
+        return std::make_tuple(EMPTY, ret);
+    }
+    return std::make_tuple(sgId, EMPTY);
+}
+
+
+/*
+func createSSHKeyPair(client *ec2.EC2) error {
+	fmt.Println("creating createSSHKeyPair...")
+	dkpi := &ec2.DeleteKeyPairInput{
+		KeyName: aws.String(keyName),
+	}
+	client.DeleteKeyPair(dkpi)
+
+	ckpi := &ec2.CreateKeyPairInput{
+		KeyName: aws.String(keyName),
+	}
+	createKeyPairOutput, err := client.CreateKeyPair(ckpi)
+	if err != nil {
+		return err
+	}
+	writeFile(keyName+".pem", []byte(*createKeyPairOutput.KeyMaterial))
+	return nil
+}
+*/
+
+
+
 
 
 int main(int argc, char** argv) {
@@ -314,7 +453,17 @@ int main(int argc, char** argv) {
             routeTableResult << std::endl;
             return 1;
         }
-        
+
+        auto sgResult = createSecurityGroup(ec2, vpcId);
+        if (std::get<1>(sgResult) != NO_ERROR) {
+            std::cout << "Failed to create Security Group " <<
+            std::get<1>(sgResult) << std::endl;
+            return 1;
+        }
+        auto sgId = std::get<0>(sgResult);
+        std::cout << "Create Security Group Id: " << sgId << std::endl;
+
+
     }    
 
     Aws::ShutdownAPI(options);
