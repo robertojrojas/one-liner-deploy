@@ -260,7 +260,14 @@ const Aws::String createCustomRouteTable(const Aws::EC2::EC2Client &ec2,
     if (!associateRouteTableOutcome.IsSuccess()) {
         return associateRouteTableOutcome.GetError().GetMessage();
     }
-   return NO_ERROR;
+
+    std::stringstream ss;
+    ss << VPC_NAME_PREFIX << "-igw-rt";
+    auto ret =  nameResource(ec2, ss.str().c_str(), routeTableId);
+    if (ret != NO_ERROR) {
+        return ret;
+    }
+    return NO_ERROR;
 }
 
 
