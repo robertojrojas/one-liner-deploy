@@ -25,6 +25,7 @@
 #include <aws/ec2/model/InstanceNetworkInterfaceSpecification.h>
 #include <aws/ec2/model/DeleteKeyPairRequest.h>
 #include <aws/ec2/model/DescribeInstanceStatusRequest.h>
+#include <aws/ec2/model/DescribeImagesRequest.h>
 #include <aws/core/utils/HashingUtils.h>
 #include <iostream>
 #include <sstream>
@@ -47,6 +48,7 @@
 #define MYIP_SERVICE_URL "http://ipecho.net/plain"
 #define	KEY_PAIR_NAME "oneliner-key"
 #define INSTANCE_NAME "oneliner-instance"
+#define UBUNTU_XENIAL_QUERY_STR "ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64*"
 #define INSTALL_PYTHON_SCRIPT "install_python.sh"
 
 
@@ -401,15 +403,43 @@ const std::string readFile(const std::string& filename) {
   
 }
 
-const std::string findUbuntuAMI(const Aws::EC2::EC2Client &ec2) {
-    return "ami-13c15e69";
+std::tuple<const Aws::String , const Aws::String> findUbuntuAMI(const Aws::EC2::EC2Client &ec2) {
+    // Aws::EC2::Model::DescribeImagesRequest request;
+    
+    // Aws::EC2::Model::Filter ubuntuFilter;
+    // ubuntuFilter.SetName("name");
+    // ubuntuFilter.AddValues(UBUNTU_XENIAL_QUERY_STR);
+    // Aws::Vector<Aws::EC2::Model::Filter> filters;
+    // filters.push_back(ubuntuFilter);
+    // request.SetFilters(filters);
+    // auto outcome =  ec2.DescribeImages(request);
+    // if (!outcome.IsSuccess()) {
+    //    return std::make_tuple(EMPTY, outcome.GetError().GetMessage());
+    // }
+    //TODO: Sort images return to get the latest one
+    // Aws::String ubuntuAmi;
+    // auto images = outcome.GetResult().GetImages();
+    // for (const auto &ami : images) 
+    // {   
+    //     if (ami.GetVirtualizationType() == Aws::EC2::Model::VirtualizationType::hvm
+    //         ) {
+    //         return std::make_tuple(ami.GetImageId(), EMPTY);
+    //     }
+
+    // }
+    //return std::make_tuple(EMPTY, "Unable to find ubuntu ami");
+    return  std::make_tuple("ami-3dec9947", EMPTY); 
 }
 
 std::tuple<const Aws::String , const Aws::String> runInstance(const Aws::EC2::EC2Client &ec2, 
                 const Aws::String& secGroup, const Aws::String& subnetId) {
 
     Aws::EC2::Model::RunInstancesRequest runInstancesRequest;
-    auto ubuntuAMI = findUbuntuAMI(ec2);
+    auto findAmiRet = findUbuntuAMI(ec2);
+    if (std::get<1>(findAmiRet) != NO_ERROR) {
+        return std::make_tuple(EMPTY, std::get<1>(findAmiRet));
+    }
+    auto ubuntuAMI = std::get<0>(findAmiRet);
     Aws::String ami(ubuntuAMI.c_str());
     runInstancesRequest.SetImageId(ami);
     runInstancesRequest.SetInstanceType(Aws::EC2::Model::InstanceType::t2_medium);
